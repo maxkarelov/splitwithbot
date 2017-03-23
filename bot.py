@@ -104,6 +104,8 @@ def handle_receipt(bot, update):
   new_file = bot.getFile(update.message.photo[-1].file_id)
   new_file.download(file_path)
 
+  # os.popen('~/Downloads/textcleaner -g -e none -f 10 -o 5 {} {}'.format(file_path, file_path))
+
   s3 = boto3.resource(
     's3',
     config=Config(signature_version='s3v4')
@@ -114,7 +116,17 @@ def handle_receipt(bot, update):
   object_acl.put(ACL='public-read')
   url = 'https://s3.{}.amazonaws.com/{}/{}'.format(AWS_REGION, AWS_S3_BUCKET, file_name)
 
-  r = requests.post(OPENOCR_URL, json = {'img_url': url, 'engine': 'tesseract', 'engine_args': {'lang': 'rus'}})
+  r = requests.post(OPENOCR_URL, json = {
+    'img_url': url,
+    'engine': 'tesseract',
+    # 'preprocessors' : ['stroke-width-transform'],
+    'engine_args': {
+      'lang': 'rus',
+      # 'config_vars': {
+      #   'tessedit_char_whitelist': ' 0123456789йцукенгшщзхъфывапролджэёячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЁЯЧСМИТЬБЮ,:.-'
+      # }
+    }
+  })
 
   content = r.text
 

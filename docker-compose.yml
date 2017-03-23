@@ -1,0 +1,29 @@
+version: '2'
+
+services:
+  strokewidthtransform:
+    image: tleyden5iwx/open-ocr-preprocessor
+    dns: ["8.8.8.8"]
+    env_file:
+      - ./.env
+    size: s1
+    command: 'bash -c "open-ocr-preprocessor -amqp_uri ${RABBITMQ_URL} -preprocessor stroke-width-transform"'
+  openocrworker:
+    image: tleyden5iwx/open-ocr
+    dns: ["8.8.8.8"]
+    env_file:
+      - ./.env
+    size: s2
+    command: "open-ocr-worker -amqp_uri ${RABBITMQ_URL}"
+  openocr:
+    image: tleyden5iwx/open-ocr
+    ports:
+      - "9292:9292"
+    dns: ["8.8.8.8"]
+    depends_on:
+      - openocrworker
+      - strokewidthtransform
+    env_file:
+      - ./.env
+    size: s1
+    command: "open-ocr-httpd -amqp_uri ${RABBITMQ_URL} -http_port 9292"
