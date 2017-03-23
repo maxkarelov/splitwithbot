@@ -10,7 +10,8 @@ from redis import StrictRedis
 import boto3
 from botocore.client import Config
 import requests
-
+import json
+import mimetypes
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -31,7 +32,7 @@ PORT = int(os.environ.get('PORT', '5000'))
 REDIS_URL = os.environ.get('REDIS_URL')
 AWS_REGION = os.environ.get('AWS_REGION', 'eu-central-1')
 AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET')
-OPENOCR_URL = os.environ.get('OPENOCR_URL', 'http://192.168.99.100:9292/ocr')
+OCR_API_TOKEN = os.environ.get('OCR_API_TOKEN')
 
 # redis hash keys templates
 USER_KEY = 'user_{}'
@@ -97,39 +98,25 @@ def handle_receipt(bot, update):
   chat_id = update.message.chat_id
   message_id = update.message.message_id + 1
 
-  timestamp = time.time()
+  timestamp = int(time.time())
   file_name = '{}_{}_{}.png'.format(chat_id, message_id, timestamp)
   file_path = '/tmp/{}'.format(file_name)
 
   new_file = bot.getFile(update.message.photo[-1].file_id)
   new_file.download(file_path)
 
-  # os.popen('~/Downloads/textcleaner -g -e none -f 10 -o 5 {} {}'.format(file_path, file_path))
+  mime_type = mimetypes.guess_type(file_path)
 
-  s3 = boto3.resource(
-    's3',
-    config=Config(signature_version='s3v4')
-  )
+  s3 = boto3.resource('s3', config=Config(signature_version='s3v4'))
   data = open(file_path, 'rb')
-  s3.Bucket(AWS_S3_BUCKET).put_object(Key=file_name, Body=data)
-  object_acl = s3.ObjectAcl(AWS_S3_BUCKET, file_name)
-  object_acl.put(ACL='public-read')
+  s3.Bucket(AWS_S3_BUCKET).put_object(Key=file_name, Body=data, ContentType=mime_type[0], ACL='public-read')
   url = 'https://s3.{}.amazonaws.com/{}/{}'.format(AWS_REGION, AWS_S3_BUCKET, file_name)
 
-  r = requests.post(OPENOCR_URL, json = {
-    'img_url': url,
-    'engine': 'tesseract',
-    # 'preprocessors' : ['stroke-width-transform'],
-    'engine_args': {
-      'lang': 'rus',
-      'psm': '12',
-      'config_vars': {
-        'tessedit_char_whitelist': ' 0123456789йцукенгшщзхъфывапролджэёячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЁЯЧСМИТЬБЮ,:.-'
-      }
-    }
-  })
+  r = requests.get('https://api.ocr.space/parse/ImageUrl?apiKey={}&language=rus&isOverlayRequired=true&url={}'
+                   .format(OCR_API_TOKEN, url))
+  json_data = json.loads(r.text)
 
-  content = r.text
+  content = json_data['ParsedResults'][0]['ParsedText']
 
   items = []
 
@@ -139,7 +126,7 @@ def handle_receipt(bot, update):
 
   message_text = start_message
 
-  message_text += '\n\n' + content.encode('utf8')
+  message_text += '\n\n{}'.format(content.encode('utf8'))
 
   bot.sendMessage(chat_id=update.message.chat_id, text=message_text,
                   parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_buttons))

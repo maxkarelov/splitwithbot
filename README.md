@@ -20,13 +20,11 @@ https://t.me/splitwithbot
 | AWS_SECRET_ACCESS_KEY | aws secret access key   |
 | AWS_S3_BUCKET         | aws s3 bucket name      |
 | AWS_REGION            | aws s3 region           |
-| OPENOCR_URL           | open ocr endpoint       |
+| OCR_API_TOKEN         | ocr.space token         |
 
 ### Components
 
-* Telegram Bot [heroku.com](https://heroku.com)
-* RabbitMQ [cloudamqp.com](https://cloudamqp.com)
-* Tesseract-related components [hyper.sh](https://hyper.sh)
+* Telegram Bot with Redis on [Heroku](https://heroku.com)
 
 ## How we store information in redis
 | hash key                                                   | hash value                                      |
@@ -39,4 +37,3 @@ https://t.me/splitwithbot
 | `chat_<chat_id>_message_<message_id>_paid`                 | set with `user_id` of users who clicked `paid`  |
 |`chat_<chat_id>_message_<message_id>_item_<item_id>`        | dictionary with fields `name`, `price`          |
 | `chat_<chat_id>_message_<message_id>_item_<item_id>_users` | set with `user_id` of users who clicked on item |
-

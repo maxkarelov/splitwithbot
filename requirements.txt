@@ -2,3 +2,4 @@ python-telegram-bot
 redis
 boto3
 requests
+mime
