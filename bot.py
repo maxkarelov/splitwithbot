@@ -5,9 +5,12 @@ from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, F
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
 import os
-from process import process
 import time
 from redis import StrictRedis
+import boto3
+from botocore.client import Config
+import requests
+
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -26,6 +29,9 @@ URL = os.environ.get('URL')
 TOKEN = os.environ.get('TOKEN')
 PORT = int(os.environ.get('PORT', '5000'))
 REDIS_URL = os.environ.get('REDIS_URL')
+AWS_REGION = os.environ.get('AWS_REGION', 'eu-central-1')
+AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET')
+OPENOCR_URL = os.environ.get('OPENOCR_URL', 'http://192.168.99.100:9292/ocr')
 
 # redis hash keys templates
 USER_KEY = 'user_{}'
@@ -88,18 +94,39 @@ def start(bot, update):
 
 
 def handle_receipt(bot, update):
+  chat_id = update.message.chat_id
+  message_id = update.message.message_id + 1
+
   timestamp = time.time()
-  file_path = '/tmp/{}.png'.format(timestamp)
+  file_name = '{}_{}_{}.png'.format(chat_id, message_id, timestamp)
+  file_path = '/tmp/{}'.format(file_name)
+
   new_file = bot.getFile(update.message.photo[-1].file_id)
   new_file.download(file_path)
 
-  items = process(file_path)
+  s3 = boto3.resource(
+    's3',
+    config=Config(signature_version='s3v4')
+  )
+  data = open(file_path, 'rb')
+  s3.Bucket(AWS_S3_BUCKET).put_object(Key=file_name, Body=data)
+  object_acl = s3.ObjectAcl(AWS_S3_BUCKET, file_name)
+  object_acl.put(ACL='public-read')
+  url = 'https://s3.{}.amazonaws.com/{}/{}'.format(AWS_REGION, AWS_S3_BUCKET, file_name)
+
+  r = requests.post(OPENOCR_URL, json = {'img_url': url, 'engine': 'tesseract', 'engine_args': {'lang': 'rus'}})
+
+  content = r.text
+
+  items = []
 
   inline_buttons = []
   for item in items:
     inline_buttons.append([InlineKeyboardButton('{} {}'.format(item['name'], item['total']), callback_data=item['id'])])
 
   message_text = start_message
+
+  message_text += '\n\n' + content.encode('utf8')
 
   bot.sendMessage(chat_id=update.message.chat_id, text=message_text,
                   parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_buttons))

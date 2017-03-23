@@ -7,7 +7,18 @@ Telegram bot for splitting receipts between participants in your chats
 https://t.me/splitwithbot
 
 ## Deployment
-TBD..
+ 
+| environment variable  | notes                   |
+|-----------------------|-------------------------|
+| MODE                  | `webhook` or `polling`  |
+| REDIS_URL             | connection url to redis |
+| TOKEN                 | telegram bot token      |
+| URL                   | heroku app url          |
+| AWS_ACCESS_KEY_ID     | aws access key id       |
+| AWS_SECRET_ACCESS_KEY | aws secret access key   |
+| AWS_S3_BUCKET         | aws s3 bucket name      |
+| AWS_REGION            | aws s3 region           |
+| OPENOCR_URL           | open ocr endpoint       |
 
 ## How we store information in redis
 | hash key                                                   | hash value                                      |
