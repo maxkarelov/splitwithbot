@@ -25,5 +25,5 @@ services:
       - strokewidthtransform
     env_file:
       - ./.env
-    size: s1
+    size: s2
     command: "open-ocr-httpd -amqp_uri ${RABBITMQ_URL} -http_port 9292"

@@ -122,9 +122,10 @@ def handle_receipt(bot, update):
     # 'preprocessors' : ['stroke-width-transform'],
     'engine_args': {
       'lang': 'rus',
-      # 'config_vars': {
-      #   'tessedit_char_whitelist': ' 0123456789йцукенгшщзхъфывапролджэёячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЁЯЧСМИТЬБЮ,:.-'
-      # }
+      'psm': '12',
+      'config_vars': {
+        'tessedit_char_whitelist': ' 0123456789йцукенгшщзхъфывапролджэёячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЁЯЧСМИТЬБЮ,:.-'
+      }
     }
   })
 
@@ -176,7 +177,7 @@ def handle_receipt_stub(bot, update):
                   reply_markup=InlineKeyboardMarkup(inline_buttos))
 
 
-def button(bot, update):
+def button_click(bot, update):
   query = update.callback_query
 
   user_id = query.from_user.id
@@ -361,8 +362,8 @@ def button(bot, update):
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
-dispatcher.add_handler(CommandHandler('f', handle_receipt_stub))
-dispatcher.add_handler(CallbackQueryHandler(button))
+dispatcher.add_handler(CommandHandler('photo', handle_receipt_stub))
+dispatcher.add_handler(CallbackQueryHandler(button_click))
 
 if MODE == 'webhook':
   updater.start_webhook(listen='0.0.0.0', port=PORT, url_path=TOKEN)
