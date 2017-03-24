@@ -34,15 +34,17 @@ AWS_REGION = os.environ.get('AWS_REGION', 'eu-central-1')
 AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET')
 OCR_API_TOKEN = os.environ.get('OCR_API_TOKEN')
 
+EXPIRATION = int(os.environ.get('EXPIRATION', 604800))
+
 # redis hash keys templates
 USER_KEY = 'user_{}'
-CHAT_MESSAGE_OWNER_KEY = 'chat_{}_message_{}_owner'
-CHAT_MESSAGE_STATUS_KEY = 'chat_{}_message_{}_status'
-CHAT_MESSAGE_ITEMS_KEY = 'chat_{}_message_{}_items'
-CHAT_MESSAGE_DONE_KEY = 'chat_{}_message_{}_done'
-CHAT_MESSAGE_PAID_KEY = 'chat_{}_message_{}_paid'
-CHAT_MESSAGE_ITEM_KEY = 'chat_{}_message_{}_item_{}'
-CHAT_MESSAGE_ITEM_USERS_KEY = 'chat_{}_message_{}_item_{}_users'
+CHAT_MESSAGE_OWNER_KEY = '{}_{}_owner'
+CHAT_MESSAGE_STATUS_KEY = '{}_{}_status'
+CHAT_MESSAGE_ITEMS_KEY = '{}_{}_items'
+CHAT_MESSAGE_DONE_KEY = '{}_{}_done'
+CHAT_MESSAGE_PAID_KEY = '{}_{}_paid'
+CHAT_MESSAGE_ITEM_KEY = '{}_{}_{}'
+CHAT_MESSAGE_ITEM_USERS_KEY = '{}_{}_{}_users'
 
 OPEN_STATUS = 'open'
 WAIT_PAYMENTS_STATUS = 'wait_payments'
@@ -150,12 +152,17 @@ def handle_receipt_stub(bot, update):
   redis_client.hset(USER_KEY.format(owner_id), 'ln', owner_last_name)
 
   redis_client.set(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), owner_id)
+  redis_client.expire(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), EXPIRATION)
   redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
+  redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
+
 
   for item in items:
     redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
+    redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
+    redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
     inline_buttos.append([InlineKeyboardButton('{} {}'.format(item['name'], int(item['total'])), callback_data=item['id'])])
 
   message_text = start_message
@@ -200,6 +207,7 @@ def button_click(bot, update):
       if str(user_id) not in paid_ids:
         paid_ids.add(str(user_id))
         redis_client.sadd(CHAT_MESSAGE_PAID_KEY.format(chat_id, message_id), user_id)
+        redis_client.expire(CHAT_MESSAGE_PAID_KEY.format(chat_id, message_id), EXPIRATION)
 
         owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
         owner_username = redis_client.hget(USER_KEY.format(owner_id), 'un')
@@ -220,6 +228,7 @@ def button_click(bot, update):
 
       if len(paid_ids)+1 == len(user_ids):
         redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), CLOSED_STATUS)
+        redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
         bot.editMessageText(text='<b>Чек закрыт</b>', chat_id=chat_id,
                             message_id=message_id, parse_mode='HTML')
         return
@@ -230,6 +239,7 @@ def button_click(bot, update):
       if int(owner_id) != int(user_id):
         return
       redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), WAIT_PAYMENTS_STATUS)
+      redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
     owner_username = redis_client.hget(USER_KEY.format(owner_id), 'un')
     owner_first_name = redis_client.hget(USER_KEY.format(owner_id), 'fn')
@@ -291,12 +301,15 @@ def button_click(bot, update):
     return
   elif button_key == DONE_BUTTON:
     redis_client.sadd(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), user_id)
+    redis_client.expire(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), EXPIRATION)
   elif button_key == RESET_BUTTON:
     redis_client.srem(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), user_id)
     for item_id in item_ids:
       redis_client.srem(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, item_id), user_id)
+    redis_client.srem(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, item_id), EXPIRATION)
   else:
     redis_client.sadd(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, button_key), user_id)
+    redis_client.expire(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, button_key), EXPIRATION)
 
   users = {}
 
