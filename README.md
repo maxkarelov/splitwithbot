@@ -22,6 +22,7 @@ https://t.me/splitwithbot
 | AWS_REGION            | aws s3 region           |
 | OCR_API_TOKEN         | ocr.space token         |
 | EXPIRATION            | ttl for redis hashes    |
+| DATABASE_URL          | database connection url |
 
 ### Components
 

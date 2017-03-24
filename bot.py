@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from redis import StrictRedis
+import psycopg2
 import boto3
 from botocore.client import Config
 import requests
@@ -36,7 +37,7 @@ REDIS_URL = os.environ.get('REDIS_URL')
 AWS_REGION = os.environ.get('AWS_REGION', 'eu-central-1')
 AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET')
 OCR_API_TOKEN = os.environ.get('OCR_API_TOKEN')
-
+DATABASE_URL = os.environ.get('DATABASE_URL')
 EXPIRATION = int(os.environ.get('EXPIRATION', 604800))
 
 # redis hash keys templates
@@ -61,6 +62,8 @@ PARSED_OK_BUTTON = 'parsed_ok'
 PARSED_BAD_BUTTON = 'parsed_bad'
 
 redis_client = StrictRedis.from_url(REDIS_URL, charset='utf-8', decode_responses=True)
+postgres_conn = psycopg2.connect(DATABASE_URL)
+db_cursor = postgres_conn.cursor()
 
 updater = Updater(TOKEN)
 dispatcher = updater.dispatcher
@@ -244,7 +247,7 @@ def handle_receipt(bot, update):
   owner_last_name = update.message.from_user.last_name
 
   inline_buttons = [[InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)],
-                    [InlineKeyboardButton('{} Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
+                    [InlineKeyboardButton('{}   Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
 
   redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
   redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
@@ -328,7 +331,8 @@ def button_click(bot, update):
       if len(paid_ids)+1 == len(user_ids):
         redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), CLOSED_STATUS)
         redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
-        bot.editMessageText(text='<b>Чек закрыт</b>', chat_id=chat_id,
+        bot.editMessageText(text='<b>Чек закрыт</b>\n\nОставьте комментарий о работе и функциональности бота по команде /feedback',
+                            chat_id=chat_id,
                             message_id=message_id, parse_mode='HTML')
         return
 
@@ -341,6 +345,7 @@ def button_click(bot, update):
         return
       if len(done_user_ids) < 2:
         bot.answerCallbackQuery(update.callback_query.id, 'ни с кем не поделился')
+        return
       redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), WAIT_PAYMENTS_STATUS)
       redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
@@ -425,6 +430,10 @@ def button_click(bot, update):
   elif button_key == PARSED_BAD_BUTTON:
     owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
     if int(owner_id) == int(user_id):
+      db_cursor.execute("""INSERT INTO report (user_id, username, first_name, last_name, chat_id, message_id, url, date)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
+                        (user_id, user_username, user_first_name, user_last_name, chat_id, message_id, None))
+      postgres_conn.commit()
       bot.editMessageText(text=sorry_message, chat_id=chat_id,
                           message_id=message_id, parse_mode='HTML')
     else:
@@ -487,6 +496,25 @@ def button_click(bot, update):
                       reply_markup=InlineKeyboardMarkup(inline_buttons))
 
 
+def feedback(bot, update, args):
+  chat_id = update.message.chat_id
+  message_id = update.message.message_id
+  user_id = update.message.from_user.id
+  username = update.message.from_user.username
+  first_name = update.message.from_user.first_name
+  last_name = update.message.from_user.last_name
+  text = ' '.join(args)
+  if text == '':
+    bot.sendMessage(chat_id=chat_id, parse_mode='HTML',
+                    text='Чтобы оставить отзыв используйте команду <b>/feedback</b> и напишите дальше свой комментарий.\n\nЕсли вы можете сообщить более детально что-либо, напишите об этом и команда разработчков свяжется с вами.\n\nСпасибо за участие! 😉')
+    return
+  db_cursor.execute("""INSERT INTO feedback (user_id, username, first_name, last_name, chat_id, message_id, text, date)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
+                    (user_id, username, first_name, last_name, chat_id, message_id, text))
+  postgres_conn.commit()
+  bot.sendMessage(chat_id=update.message.chat_id, text='{} Спасибо за отзыв!'.format(ROBOT_ICON))
+
+
 def error_callback(bot, update, error):
   try:
     raise error
@@ -495,6 +523,7 @@ def error_callback(bot, update, error):
 
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
+dispatcher.add_handler(CommandHandler('feedback', feedback, pass_args=True))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
 dispatcher.add_handler(CallbackQueryHandler(button_click))
 dispatcher.add_error_handler(error_callback)

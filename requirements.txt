@@ -3,3 +3,4 @@ redis
 boto3
 requests
 mime
+psycopg2
