@@ -60,6 +60,72 @@ redis_client = StrictRedis.from_url(REDIS_URL)
 updater = Updater(TOKEN)
 dispatcher = updater.dispatcher
 
+def parse_ocr_output(data):
+  lines = data['ParsedResults'][0]['TextOverlay']['Lines']
+
+  words = []
+
+  for line in lines:
+    for word in line['Words']:
+      words.append({
+        'text': word['WordText'],
+        'left': word['Left'],
+        'top': word['Top'],
+        'height': word['Height'],
+        'width': word['Width']
+      })
+
+  result = []
+
+  for word in sorted(words, key=lambda k: k['top']):
+    if len(result) == 0:
+      result.append([word])
+    else:
+      is_found = False
+      for i in range(0, len(result)):
+        if abs(word['top'] - result[i][0]['top']) < 25:
+          result[i].append(word)
+          result[i] = sorted(result[i], key=lambda k: k['left'])
+          is_found = True
+          break
+      if not is_found:
+        result.append([word])
+
+  # remove header and footer from receipt
+  result2 = []
+  section = 1
+  for line in result:
+    line2 = []
+    for word in line:
+      if 'блюдо' in word['text'].lower() or 'кол-во' in word['text'].lower() \
+            or 'сумма' in word['text'].lower() or 'сунна' in word['text'].lower():
+        section = 2
+        continue
+
+      if 'всего' in word['text'].lower() or 'итог' in word['text'].lower():
+        section = 3
+        break
+
+      line2.append(word)
+
+    if section == 1:
+      continue
+    elif section == 2:
+      result2.append(line2)
+    else:
+      break
+
+  # return list of string
+  items = []
+
+  for line in result2:
+    item = ''
+    for word in line:
+      item += '{} '.format(word['text'])
+    items.append(item)
+
+  return items
+
 items = [
   {
     "id": '1',
@@ -118,7 +184,11 @@ def handle_receipt(bot, update):
                    .format(OCR_API_TOKEN, url))
   json_data = json.loads(r.text)
 
-  content = json_data['ParsedResults'][0]['ParsedText']
+  raw_items = parse_ocr_output(json_data)
+  content = ''
+
+  for item in raw_items:
+    content += '{}\n'.format(item)
 
   items = []
 
@@ -128,7 +198,7 @@ def handle_receipt(bot, update):
 
   message_text = start_message
 
-  message_text += '\n\n{}'.format(content.encode('utf8'))
+  message_text += '\n\n{}'.format(content)
 
   bot.sendMessage(chat_id=update.message.chat_id, text=message_text,
                   parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_buttons))
