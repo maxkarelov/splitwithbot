@@ -2,7 +2,7 @@
 
 from telegram.ext import Updater
 from telegram.ext import CommandHandler, MessageHandler, CallbackQueryHandler, Filters
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, ChatAction
 import logging
 import os
 import time
@@ -16,6 +16,8 @@ import mimetypes
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+FINGER_UP = '👍🏻'
+FINGER_DOWN = '👎🏻'
 UP_ICON = '👍'
 MAN_ICON = '🕵'
 DONE_ICON = '✅'
@@ -24,6 +26,7 @@ PIZZA_ICON = '🍕'
 CARD_ICON = '💳'
 RESET_ICON = '🗑'
 HAND_ICON = '✍'
+EYES_ICON = '😳'
 
 MODE = os.environ.get('MODE', 'polling')
 URL = os.environ.get('URL')
@@ -54,6 +57,8 @@ DONE_BUTTON = 'done'
 PAID_BUTTON = 'paid'
 CLOSE_BUTTON = 'close'
 RESET_BUTTON = 'reset'
+PARSED_OK_BUTTON = 'parsed_ok'
+PARSED_BAD_BUTTON = 'parsed_bad'
 
 redis_client = StrictRedis.from_url(REDIS_URL, charset='utf-8', decode_responses=True)
 
@@ -155,6 +160,15 @@ help_message = 'Чат бот для разделения общего чека 
                'Потом тот, кто скинул чек подтвердит его, и бот расчитает для каждого сумму, которую нужно перевести\n\n' \
                'Нажми <b>Я оплатил!</b> и бот закроет ваш перевод'
 
+init_message = '<b>{} Проверь, правильно ли я распознал чек</b>\n\n'.format(EYES_ICON)
+
+sorry_message = 'Я рассмотрю этот случай.\n' \
+                'Ты можешь написать отзыв командой /feedback и описать, любую критику и пожелания.\n\n' \
+                '<b>Для лучшего распознавания необходимо:</b>\n' \
+                '1. Расправить чек\n' \
+                '2. Сфотографировать при достаточном количестве света\n' \
+                '3. Сразу обрезать лишние поля чека, чтобы на фото попали только позиции и цены\n'
+
 start_message = MAN_ICON + ' Разделить чек\n\n' \
                 '1. Каждый кликает по позициям, которые хочет поделить\n' \
                 '2. Потом нажимает <b>Я все!</b>\n' \
@@ -210,17 +224,19 @@ def handle_receipt(bot, update):
 
 
 def handle_receipt_stub(bot, update):
+
+  chat_id = update.message.chat_id
+  message_id = update.message.message_id + 1
+
+  bot.sendChatAction(chat_id, ChatAction.TYPING)
+
   owner_id = update.message.from_user.id
   owner_username = update.message.from_user.username
   owner_first_name = update.message.from_user.first_name
   owner_last_name = update.message.from_user.last_name
 
-  chat_id = update.message.chat_id
-  message_id = update.message.message_id + 1
-
-  inline_buttos = [[InlineKeyboardButton('{} Я все!'.format(DONE_ICON), callback_data=DONE_BUTTON)],
-                   [InlineKeyboardButton('{} Сбросить'.format(RESET_ICON), callback_data=RESET_BUTTON)],
-                   [InlineKeyboardButton('{} Закрыть'.format(HAND_ICON), callback_data=CLOSE_BUTTON)]]
+  inline_buttons = [[InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)],
+                    [InlineKeyboardButton('{} Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
 
   redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
   redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
@@ -231,6 +247,7 @@ def handle_receipt_stub(bot, update):
   redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
   redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
+  message_text = init_message
 
   for item in items:
     redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
@@ -238,12 +255,10 @@ def handle_receipt_stub(bot, update):
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
     redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
-    inline_buttos.append([InlineKeyboardButton('{} {}'.format(item['name'], int(item['total'])), callback_data=item['id'])])
-
-  message_text = start_message
+    message_text += '{} - {} руб.\n'.format(item['name'], item['total'])
 
   bot.sendMessage(chat_id=chat_id, text=message_text, parse_mode='HTML',
-                  reply_markup=InlineKeyboardMarkup(inline_buttos))
+                  reply_markup=InlineKeyboardMarkup(inline_buttons))
 
 
 def button_click(bot, update):
@@ -275,7 +290,10 @@ def button_click(bot, update):
     if button_key == PAID_BUTTON:
       owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
       if int(owner_id) == int(user_id):
+        bot.answerCallbackQuery(update.callback_query.id, 'нельзя перевести самому себе')
         return
+      else:
+        bot.answerCallbackQuery(update.callback_query.id, 'оплата отмечена')
 
       paid_ids = redis_client.smembers(CHAT_MESSAGE_PAID_KEY.format(chat_id, message_id))
 
@@ -311,8 +329,12 @@ def button_click(bot, update):
     owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
 
     if button_key == CLOSE_BUTTON:
+      done_user_ids = redis_client.smembers(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id))
       if int(owner_id) != int(user_id):
+        bot.answerCallbackQuery(update.callback_query.id, 'закрыть может только тот, кто платил')
         return
+      if len(done_user_ids) < 2:
+        bot.answerCallbackQuery(update.callback_query.id, 'ни с кем не поделился')
       redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), WAIT_PAYMENTS_STATUS)
       redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
@@ -375,14 +397,37 @@ def button_click(bot, update):
                         reply_markup=InlineKeyboardMarkup(inline_buttons))
     return
   elif button_key == DONE_BUTTON:
+    bot.answerCallbackQuery(update.callback_query.id, 'отметился в чеке'
+                            .format(user_username, user_first_name, user_last_name))
     redis_client.sadd(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), user_id)
     redis_client.expire(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), EXPIRATION)
   elif button_key == RESET_BUTTON:
+    bot.answerCallbackQuery(update.callback_query.id, 'сбросил'
+                            .format(user_username, user_first_name, user_last_name))
     redis_client.srem(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id), user_id)
     for item_id in item_ids:
       redis_client.srem(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, item_id), user_id)
     redis_client.srem(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, item_id), EXPIRATION)
+  elif button_key == PARSED_OK_BUTTON:
+    owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
+    if int(owner_id) == int(user_id):
+      bot.answerCallbackQuery(update.callback_query.id, 'чек создан'
+                              .format(user_username, user_first_name, user_last_name))
+    else:
+      bot.answerCallbackQuery(update.callback_query.id, 'может нажать только создатель')
+      return
+  elif button_key == PARSED_BAD_BUTTON:
+    owner_id = redis_client.get(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id))
+    if int(owner_id) == int(user_id):
+      bot.editMessageText(text=sorry_message, chat_id=chat_id,
+                          message_id=message_id, parse_mode='HTML')
+    else:
+      bot.answerCallbackQuery(update.callback_query.id, 'может нажать только создатель')
+    return
   else:
+    item_name = redis_client.hget(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, button_key), 'name')
+    bot.answerCallbackQuery(update.callback_query.id, 'выбрано'
+                            .format(user_username, user_first_name, user_last_name, item_name))
     redis_client.sadd(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, button_key), user_id)
     redis_client.expire(CHAT_MESSAGE_ITEM_USERS_KEY.format(chat_id, message_id, button_key), EXPIRATION)
 
