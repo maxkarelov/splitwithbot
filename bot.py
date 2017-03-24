@@ -55,7 +55,7 @@ PAID_BUTTON = 'paid'
 CLOSE_BUTTON = 'close'
 RESET_BUTTON = 'reset'
 
-redis_client = StrictRedis.from_url(REDIS_URL)
+redis_client = StrictRedis.from_url(REDIS_URL, charset='utf-8', decode_responses=True)
 
 updater = Updater(TOKEN)
 dispatcher = updater.dispatcher
@@ -391,6 +391,8 @@ def button_click(bot, update):
   message_text = '{} Разделить чек\n\n'.format(MAN_ICON)
 
   for item_id in item_ids:
+    item_id = int(float(item_id))
+
     item_name = redis_client.hget(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_id), 'name')
     item_price = float(redis_client.hget(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_id), 'price'))
 
@@ -414,7 +416,7 @@ def button_click(bot, update):
       message_text += '@{} ({} {}) - {} руб.\n'.format(users[user_id]['un'], users[user_id]['fn'],
                                                        users[user_id]['ln'], price_per_user)
 
-    inline_buttons.append([InlineKeyboardButton('{} {}'.format(item_name, int(item_price)), callback_data=item_id)])
+    inline_buttons.append([InlineKeyboardButton('{} {}'.format(item_name, int(item_price)), callback_data=str(item_id))])
     message_text += '\n'
 
   done_user_ids = redis_client.smembers(CHAT_MESSAGE_DONE_KEY.format(chat_id, message_id))
@@ -433,12 +435,18 @@ def button_click(bot, update):
                       parse_mode='HTML',
                       reply_markup=InlineKeyboardMarkup(inline_buttons))
 
+def error_callback(bot, update, error):
+  try:
+    raise error
+  except Exception as e:
+    print(e)
 
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
 dispatcher.add_handler(CommandHandler('photo', handle_receipt_stub))
 dispatcher.add_handler(CallbackQueryHandler(button_click))
+dispatcher.add_error_handler(error_callback)
 
 if MODE == 'webhook':
   updater.start_webhook(listen='0.0.0.0', port=PORT, url_path=TOKEN)
