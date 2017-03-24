@@ -60,6 +60,7 @@ redis_client = StrictRedis.from_url(REDIS_URL)
 updater = Updater(TOKEN)
 dispatcher = updater.dispatcher
 
+
 def parse_ocr_output(data):
   lines = data['ParsedResults'][0]['TextOverlay']['Lines']
 
@@ -91,10 +92,24 @@ def parse_ocr_output(data):
       if not is_found:
         result.append([word])
 
-  # remove header and footer from receipt
-  result2 = []
+  result2 = result
+
+  # return list of string
+  items = []
+
+  for line in result2:
+    item = ''
+    for word in line:
+      item += '{} '.format(word['text'])
+    items.append(item)
+
+  return items
+
+
+def subway_filter(data):
+  result = []
   section = 1
-  for line in result:
+  for line in data:
     line2 = []
     for word in line:
       if 'блюдо' in word['text'].lower() or 'кол-во' in word['text'].lower() \
@@ -111,20 +126,10 @@ def parse_ocr_output(data):
     if section == 1:
       continue
     elif section == 2:
-      result2.append(line2)
+      result.append(line2)
     else:
       break
-
-  # return list of string
-  items = []
-
-  for line in result2:
-    item = ''
-    for word in line:
-      item += '{} '.format(word['text'])
-    items.append(item)
-
-  return items
+  return result
 
 items = [
   {
