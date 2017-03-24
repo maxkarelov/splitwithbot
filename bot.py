@@ -182,6 +182,7 @@ def start(bot, update):
 
 
 def handle_receipt(bot, update):
+
   chat_id = update.message.chat_id
   message_id = update.message.message_id + 1
 
@@ -209,24 +210,31 @@ def handle_receipt(bot, update):
   for item in raw_items:
     content += '{}\n'.format(item)
 
-  items = []
+  owner_id = update.message.from_user.id
+  owner_username = update.message.from_user.username
+  owner_first_name = update.message.from_user.first_name
+  owner_last_name = update.message.from_user.last_name
+
+  redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
+  redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
+  redis_client.hset(USER_KEY.format(owner_id), 'ln', owner_last_name)
+
+  redis_client.set(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), owner_id)
+  redis_client.expire(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), EXPIRATION)
+  redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
+  redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
   inline_buttons = []
   for item in items:
+    redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
+    redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
+    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
+    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
+    redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
     inline_buttons.append([InlineKeyboardButton('{} {}'.format(item['name'], item['total']), callback_data=item['id'])])
 
-  message_text = start_message
-
-  message_text += '\n\n{}'.format(content)
-
-  bot.sendMessage(chat_id=update.message.chat_id, text=message_text,
-                  parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_buttons))
-
-
-def handle_receipt_stub(bot, update):
-
-  chat_id = update.message.chat_id
-  message_id = update.message.message_id + 1
+  message_text = init_message
+  message_text += content
 
   bot.sendChatAction(chat_id, ChatAction.TYPING)
 
@@ -247,15 +255,13 @@ def handle_receipt_stub(bot, update):
   redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
   redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
 
-  message_text = init_message
-
   for item in items:
     redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
     redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
     redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
     redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
-    message_text += '{} - {} руб.\n'.format(item['name'], item['total'])
+    # message_text += '{} - {} руб.\n'.format(item['name'], item['total'])
 
   bot.sendMessage(chat_id=chat_id, text=message_text, parse_mode='HTML',
                   reply_markup=InlineKeyboardMarkup(inline_buttons))
@@ -480,6 +486,7 @@ def button_click(bot, update):
                       parse_mode='HTML',
                       reply_markup=InlineKeyboardMarkup(inline_buttons))
 
+
 def error_callback(bot, update, error):
   try:
     raise error
@@ -489,7 +496,6 @@ def error_callback(bot, update, error):
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
-dispatcher.add_handler(CommandHandler('photo', handle_receipt_stub))
 dispatcher.add_handler(CallbackQueryHandler(button_click))
 dispatcher.add_error_handler(error_callback)
 
