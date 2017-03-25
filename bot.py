@@ -39,6 +39,7 @@ AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET')
 OCR_API_TOKEN = os.environ.get('OCR_API_TOKEN')
 DATABASE_URL = os.environ.get('DATABASE_URL')
 EXPIRATION = int(os.environ.get('EXPIRATION', 604800))
+FEEDBACK_SESSION_EXPIRATION = 600
 
 # redis hash keys templates
 USER_KEY = 'user_{}'
@@ -49,6 +50,7 @@ CHAT_MESSAGE_DONE_KEY = '{}_{}_done'
 CHAT_MESSAGE_PAID_KEY = '{}_{}_paid'
 CHAT_MESSAGE_ITEM_KEY = '{}_{}_{}'
 CHAT_MESSAGE_ITEM_USERS_KEY = '{}_{}_{}_users'
+FB_CHAT_USER_KEY = 'fb_{}_{}'
 
 OPEN_STATUS = 'open'
 WAIT_PAYMENTS_STATUS = 'wait_payments'
@@ -165,7 +167,7 @@ help_message = 'Чат бот для разделения общего чека 
 
 init_message = '<b>{} Проверь, правильно ли я распознал чек</b>\n\n'.format(EYES_ICON)
 
-sorry_message = 'Я рассмотрю этот случай.\n' \
+sorry_message = '<b>Мы рассмотрем этот случай.</b>\n\n' \
                 'Ты можешь написать отзыв командой /feedback и описать, любую критику и пожелания.\n\n' \
                 '<b>Для лучшего распознавания необходимо:</b>\n' \
                 '1. Расправить чек\n' \
@@ -247,7 +249,7 @@ def handle_receipt(bot, update):
   owner_last_name = update.message.from_user.last_name
 
   inline_buttons = [[InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)],
-                    [InlineKeyboardButton('{}   Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
+                    [InlineKeyboardButton('{}     Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
 
   redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
   redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
@@ -496,23 +498,46 @@ def button_click(bot, update):
                       reply_markup=InlineKeyboardMarkup(inline_buttons))
 
 
-def feedback(bot, update, args):
+def feedback(bot, update):
+  chat_id = update.message.chat_id
+  message_id = update.message.message_id
+  user_id = update.message.from_user.id
+  first_name = update.message.from_user.first_name
+
+  message_text = ''
+  if first_name:
+    message_text += '<b>{}</b>, спасибо за участие в улучшении бота.\n'.format(first_name)
+  else:
+    message_text += 'Спасибо за участие в улучшении бота.\n'
+
+  message_text += 'В следующем сообщении оставьте свой отзыв.\n\n' \
+                 'Если вы можете сообщить более детально что-либо,\n' \
+                 'напишите об этом и команда разработчков свяжется с вами. 😉'
+
+  redis_client.set(FB_CHAT_USER_KEY.format(chat_id, user_id), message_id)
+  redis_client.expire(FB_CHAT_USER_KEY.format(chat_id, user_id), FEEDBACK_SESSION_EXPIRATION)
+  bot.sendMessage(chat_id=chat_id, parse_mode='HTML', text=message_text)
+
+
+def message(bot, update):
   chat_id = update.message.chat_id
   message_id = update.message.message_id
   user_id = update.message.from_user.id
   username = update.message.from_user.username
   first_name = update.message.from_user.first_name
   last_name = update.message.from_user.last_name
-  text = ' '.join(args)
-  if text == '':
-    bot.sendMessage(chat_id=chat_id, parse_mode='HTML',
-                    text='Чтобы оставить отзыв используйте команду <b>/feedback</b> и напишите дальше свой комментарий.\n\nЕсли вы можете сообщить более детально что-либо, напишите об этом и команда разработчков свяжется с вами.\n\nСпасибо за участие! 😉')
-    return
-  db_cursor.execute("""INSERT INTO feedback (user_id, username, first_name, last_name, chat_id, message_id, text, date)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
-                    (user_id, username, first_name, last_name, chat_id, message_id, text))
-  postgres_conn.commit()
-  bot.sendMessage(chat_id=update.message.chat_id, text='{} Спасибо за отзыв!'.format(ROBOT_ICON))
+  message_text = update.message.text
+
+  check_message_id = redis_client.get(FB_CHAT_USER_KEY.format(chat_id, user_id))
+
+  if check_message_id and message_id - int(check_message_id) < 30:
+    db_cursor.execute("""INSERT INTO feedback (user_id, username, first_name, last_name, chat_id, message_id, text, date)
+                         VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
+                      (user_id, username, first_name, last_name, chat_id, message_id, message_text))
+    postgres_conn.commit()
+    redis_client.delete(FB_CHAT_USER_KEY.format(chat_id, user_id))
+    bot.sendMessage(chat_id=update.message.chat_id, text='{} Спасибо за отзыв!'.format(ROBOT_ICON))
+  return
 
 
 def error_callback(bot, update, error):
@@ -521,9 +546,11 @@ def error_callback(bot, update, error):
   except Exception as e:
     print(e)
 
+
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
-dispatcher.add_handler(CommandHandler('feedback', feedback, pass_args=True))
+dispatcher.add_handler(CommandHandler('feedback', feedback))
+dispatcher.add_handler(MessageHandler(Filters.text, message))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
 dispatcher.add_handler(CallbackQueryHandler(button_click))
 dispatcher.add_error_handler(error_callback)

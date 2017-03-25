@@ -39,3 +39,4 @@ https://t.me/splitwithbot
 | `<chat_id>_<message_id>_paid`            | set with `user_id` of users who clicked `paid`  |
 | `<chat_id>_<message_id>_<item_id>`       | dictionary with fields `name`, `price`          |
 | `<chat_id>_<message_id>_<item_id>_users` | set with `user_id` of users who clicked on item |
+| `fb_<chat_id>_<user_id>`    | temporary hash with 15 minutes ttl for feedback |
