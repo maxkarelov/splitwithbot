@@ -102,44 +102,45 @@ def parse_ocr_output(data):
       if not is_found:
         result.append([word])
 
-  result2 = result
+  # something wrong
+  if len(result) > 10:
+    return None, result
 
-  # return list of string
-  items = []
+  pre_items = []
 
-  for line in result2:
-    item = ''
-    for word in line:
-      item += '{} '.format(word['text'])
-    items.append(item)
+  try:
+    for i in range(0, len(result)):
+      columns = []
+      for j in range(0, len(result[i])-1):
+        if j == 0:
+          columns.append(result[i][j]['left'])
+          continue
+        if abs(result[i][j]['left'] + result[i][j]['width'] - result[i][j+1]['left']) > 60:
+          columns.append(result[i][j+1]['left'])
 
-  return items
+      item_name = ''
+      item_num = ''
+      item_price = ''
 
+      if len(columns) == 3:
+        for j in range(0, len(result[i])):
+          if result[i][j]['left'] >= columns[2]:
+            item_price += result[i][j]['text'] + ' '
+          elif result[i][j]['left'] >= columns[1]:
+            item_num += result[i][j]['text'] + ' '
+          else:
+            item_name += result[i][j]['text'] + ' '
 
-def subway_filter(data):
-  result = []
-  section = 1
-  for line in data:
-    line2 = []
-    for word in line:
-      if 'блюдо' in word['text'].lower() or 'кол-во' in word['text'].lower() \
-            or 'сумма' in word['text'].lower() or 'сунна' in word['text'].lower():
-        section = 2
-        continue
+        pre_items.append({
+          'name': item_name.strip(),
+          'num': int(float(item_num.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0'))),
+          'price': int(float(item_price.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0')))
+        })
+  except:
+    return None, result
 
-      if 'всего' in word['text'].lower() or 'итог' in word['text'].lower():
-        section = 3
-        break
+  return pre_items, result
 
-      line2.append(word)
-
-    if section == 1:
-      continue
-    elif section == 2:
-      result.append(line2)
-    else:
-      break
-  return result
 
 items = [
   {
@@ -172,7 +173,9 @@ sorry_message = '<b>Мы рассмотрим этот случай.</b>\n\n' \
                 '<b>Для лучшего распознавания необходимо:</b>\n' \
                 '1. Расправить чек\n' \
                 '2. Сфотографировать при достаточном количестве света\n' \
-                '3. Сразу обрезать лишние поля чека, чтобы на фото попали только позиции и цены\n'
+                '3. Сразу обрезать лишние поля чека, чтобы на фото попали только позиции и цены\n' \
+                '4. Проверить, что изображение снято вертикально\n\n' \
+                'Простой пример:'
 
 start_message = MAN_ICON + ' Разделить чек\n\n' \
                 '1. Каждый кликает по позициям, которые хочет поделить\n' \
@@ -209,34 +212,36 @@ def handle_receipt(bot, update):
                    .format(OCR_API_TOKEN, url))
   json_data = json.loads(r.text)
 
-  raw_items = parse_ocr_output(json_data)
+  raw_items, raw_json = parse_ocr_output(json_data)
   content = ''
 
-  for item in raw_items:
-    content += '{}\n'.format(item)
-
-  owner_id = update.message.from_user.id
-  owner_username = update.message.from_user.username
-  owner_first_name = update.message.from_user.first_name
-  owner_last_name = update.message.from_user.last_name
-
-  redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
-  redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
-  redis_client.hset(USER_KEY.format(owner_id), 'ln', owner_last_name)
-
-  redis_client.set(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), owner_id)
-  redis_client.expire(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), EXPIRATION)
-  redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
-  redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
-
   inline_buttons = []
-  for item in items:
-    redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
-    redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
-    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
-    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
-    redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
-    inline_buttons.append([InlineKeyboardButton('{} {}'.format(item['name'], item['total']), callback_data=item['id'])])
+
+  if raw_items:
+    item_ind = 0
+    for item in raw_items:
+      for k in range(item['num']):
+        content += '<b>{}</b> - {} руб.\n'.format(item['name'], item['price'])
+        redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item_ind)
+        redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
+        redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), 'name', item['name'])
+        redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), 'price', item['price'])
+        redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), EXPIRATION)
+        item_ind += 1
+    inline_buttons.append([InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)])
+  else:
+    content += 'К сожалению, на данный момент мы не можем прочитать этот чек.\n\n' \
+               'Нажмите <b>Неточно</b>, чтобы нам пришло уведомление по данному случаю.\n\n' \
+               'Вы можете оставить отзыв или комментарий командой /feedback\n\n'
+
+    content += '[DEBUG]\n'
+    for line in raw_json:
+      item_text = ''
+      for word in line:
+        item_text += '{} '.format(word['text'])
+      content += '{}\n'.format(item_text)
+
+  inline_buttons.append([InlineKeyboardButton('{}       Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)])
 
   message_text = init_message
   message_text += content
@@ -248,9 +253,6 @@ def handle_receipt(bot, update):
   owner_first_name = update.message.from_user.first_name
   owner_last_name = update.message.from_user.last_name
 
-  inline_buttons = [[InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)],
-                    [InlineKeyboardButton('{}     Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
-
   redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
   redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
   redis_client.hset(USER_KEY.format(owner_id), 'ln', owner_last_name)
@@ -259,14 +261,6 @@ def handle_receipt(bot, update):
   redis_client.expire(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), EXPIRATION)
   redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
   redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
-
-  for item in items:
-    redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
-    redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
-    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
-    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
-    redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
-    # message_text += '{} - {} руб.\n'.format(item['name'], item['total'])
 
   bot.sendMessage(chat_id=chat_id, text=message_text, parse_mode='HTML',
                   reply_markup=InlineKeyboardMarkup(inline_buttons))
@@ -438,6 +432,7 @@ def button_click(bot, update):
       postgres_conn.commit()
       bot.editMessageText(text=sorry_message, chat_id=chat_id,
                           message_id=message_id, parse_mode='HTML')
+      bot.sendPhoto(chat_id=chat_id, photo='https://s3.eu-central-1.amazonaws.com/splitwithbot/receipt_simple_sample.png')
     else:
       bot.answerCallbackQuery(update.callback_query.id, 'может нажать только создатель')
     return
