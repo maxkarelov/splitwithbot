@@ -1,10 +1,13 @@
 [@SplitWithBot](https://t.me/splitwithbot)
 ==========================================
 
-<img align="right" src="http://is5.mzstatic.com/image/thumb/Purple122/v4/e5/f7/6f/e5f76f46-c4e3-f43a-f7b6-a78877f63a9b/source/175x175bb.png">
+<img height="150" align="left" src="https://s3.eu-central-1.amazonaws.com/splitwithbot/bot_pic.png">
+<img height="80" align="right" src="http://is5.mzstatic.com/image/thumb/Purple122/v4/e5/f7/6f/e5f76f46-c4e3-f43a-f7b6-a78877f63a9b/source/175x175bb.png">
 Telegram bot for splitting receipts between participants in your chats
 
 https://t.me/splitwithbot
+
+<br><br><br>
 
 ## Deployment
  
