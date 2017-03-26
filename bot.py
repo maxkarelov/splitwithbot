@@ -73,7 +73,6 @@ dispatcher = updater.dispatcher
 
 def parse_ocr_output(data):
   lines = data['ParsedResults'][0]['TextOverlay']['Lines']
-
   words = []
 
   for line in lines:
@@ -133,8 +132,8 @@ def parse_ocr_output(data):
 
         pre_items.append({
           'name': item_name.strip(),
-          'num': int(float(item_num.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0'))),
-          'price': int(float(item_price.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0')))
+          'num': int(float(item_num.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0').replace('-', '.'))),
+          'price': int(float(item_price.strip().replace(',', '.').replace('о', '0').replace('o', '0').replace('()', '0').replace('-', '.')))
         })
   except:
     return None, result
@@ -144,19 +143,34 @@ def parse_ocr_output(data):
 
 items = [
   {
-    "id": '1',
-    "name": "пицца мясная",
-    "total": 530.0
+    'id': '1',
+    'name': 'пицца мясная',
+    'total': 530.0
   },
   {
-    "id": '2',
-    "name": "пицца гавайская",
-    "total": 480.0
+    'id': '2',
+    'name': 'пицца гавайская',
+    'total': 480.0
   },
   {
-    "id": '3',
-    "name": "сок 2л",
-    "total": 120.0
+    'id': '3',
+    'name': 'сок 2л',
+    'total': 120.0
+  },
+  {
+    'id': '4',
+    'name': 'пепси 2л',
+    'total': 80.0
+  },
+  {
+    'id': '5',
+    'name': 'сет роллов',
+    'total': 600.0
+  },
+  {
+    'id': '6',
+    'name': 'лапша 300г',
+    'total': 250.0
   }
 ]
 
@@ -189,8 +203,45 @@ def start(bot, update):
   bot.sendMessage(chat_id=update.message.chat_id, text=help_message, parse_mode='HTML')
 
 
-def handle_receipt(bot, update):
+def demo(bot, update):
+  chat_id = update.message.chat_id
+  message_id = update.message.message_id + 1
 
+  message_text = init_message
+
+  for item in items:
+    message_text += '<b>{}</b> - {} руб.\n'.format(item['name'], item['total'])
+    redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item['id'])
+    redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
+    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'name', item['name'])
+    redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), 'price', item['total'])
+    redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item['id']), EXPIRATION)
+
+  inline_buttons = [[InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)],
+                    [InlineKeyboardButton('{}       Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)]]
+
+
+  bot.sendChatAction(chat_id, ChatAction.TYPING)
+
+  owner_id = update.message.from_user.id
+  owner_username = update.message.from_user.username
+  owner_first_name = update.message.from_user.first_name
+  owner_last_name = update.message.from_user.last_name
+
+  redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
+  redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
+  redis_client.hset(USER_KEY.format(owner_id), 'ln', owner_last_name)
+
+  redis_client.set(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), owner_id)
+  redis_client.expire(CHAT_MESSAGE_OWNER_KEY.format(chat_id, message_id), EXPIRATION)
+  redis_client.set(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), 'open')
+  redis_client.expire(CHAT_MESSAGE_STATUS_KEY.format(chat_id, message_id), EXPIRATION)
+
+  bot.sendMessage(chat_id=chat_id, text=message_text, parse_mode='HTML',
+                  reply_markup=InlineKeyboardMarkup(inline_buttons))
+
+
+def handle_receipt(bot, update):
   chat_id = update.message.chat_id
   message_id = update.message.message_id + 1
 
@@ -217,6 +268,11 @@ def handle_receipt(bot, update):
 
   inline_buttons = []
 
+  owner_id = update.message.from_user.id
+  owner_username = update.message.from_user.username
+  owner_first_name = update.message.from_user.first_name
+  owner_last_name = update.message.from_user.last_name
+
   if raw_items:
     item_ind = 0
     for item in raw_items:
@@ -229,10 +285,16 @@ def handle_receipt(bot, update):
         redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), EXPIRATION)
         item_ind += 1
     inline_buttons.append([InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)])
+    inline_buttons.append([InlineKeyboardButton('{}       Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)])
   else:
+    db_cursor.execute("""INSERT INTO report (user_id, username, first_name, last_name, chat_id, message_id, url, date)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())""",
+                      (owner_id, owner_username, owner_first_name, owner_last_name, chat_id, message_id, None))
+    postgres_conn.commit()
+
     content += 'К сожалению, на данный момент мы не можем прочитать этот чек.\n\n' \
-               'Нажмите <b>Неточно</b>, чтобы нам пришло уведомление по данному случаю.\n\n' \
-               'Вы можете оставить отзыв или комментарий командой /feedback\n\n'
+               'Бот отметил этот случай для проверки и улучшения алгоритма.\n\n' \
+               'Оставьте отзыв или комментарий командой /feedback\n\n'
 
     content += '[DEBUG]\n'
     for line in raw_json:
@@ -241,17 +303,10 @@ def handle_receipt(bot, update):
         item_text += '{} '.format(word['text'])
       content += '{}\n'.format(item_text)
 
-  inline_buttons.append([InlineKeyboardButton('{}       Неточно'.format(FINGER_DOWN), callback_data=PARSED_BAD_BUTTON)])
-
   message_text = init_message
   message_text += content
 
   bot.sendChatAction(chat_id, ChatAction.TYPING)
-
-  owner_id = update.message.from_user.id
-  owner_username = update.message.from_user.username
-  owner_first_name = update.message.from_user.first_name
-  owner_last_name = update.message.from_user.last_name
 
   redis_client.hset(USER_KEY.format(owner_id), 'un', owner_username)
   redis_client.hset(USER_KEY.format(owner_id), 'fn', owner_first_name)
@@ -545,6 +600,7 @@ def error_callback(bot, update, error):
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('help', start))
 dispatcher.add_handler(CommandHandler('feedback', feedback))
+dispatcher.add_handler(CommandHandler('demo', demo))
 dispatcher.add_handler(MessageHandler(Filters.text, message))
 dispatcher.add_handler(MessageHandler(Filters.photo, handle_receipt))
 dispatcher.add_handler(CallbackQueryHandler(button_click))

@@ -1,0 +1,20 @@
+username:
+@splitwithbot
+
+name:
+@SplitWithBot
+
+botpic:
+https://s3.eu-central-1.amazonaws.com/splitwithbot/bot_pic.png
+
+about:
+Чат бот для удобного расчета внутри крутых компаний людей при общем заказе еды
+
+description:
+Чат бот для удобного разделения чека с покупки еды на группу людей
+
+commands:
+demo - начать демо
+feedback - написать отзыв
+help - показать инструкцию
+start - показать инструкцию
