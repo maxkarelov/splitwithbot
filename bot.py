@@ -278,10 +278,11 @@ def handle_receipt(bot, update):
     for item in raw_items:
       for k in range(item['num']):
         content += '<b>{}</b> - {} руб.\n'.format(item['name'], item['price'])
+        item_price = float(item['price']) / item['num']
         redis_client.sadd(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), item_ind)
         redis_client.expire(CHAT_MESSAGE_ITEMS_KEY.format(chat_id, message_id), EXPIRATION)
         redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), 'name', item['name'])
-        redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), 'price', item['price'])
+        redis_client.hset(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), 'price', item_price)
         redis_client.expire(CHAT_MESSAGE_ITEM_KEY.format(chat_id, message_id, item_ind), EXPIRATION)
         item_ind += 1
     inline_buttons.append([InlineKeyboardButton('{} Правильно!'.format(FINGER_UP), callback_data=PARSED_OK_BUTTON)])
